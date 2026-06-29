@@ -91,7 +91,7 @@ resource "google_cloud_run_v2_service" "my_app" {
 
   template {
     containers {
-      image = "us-central1-docker.pkg.dev/demo1-500618/my-app-repo/my-app:v1"
+      image = "us-central1-docker.pkg.dev/demo1-500618/my-app-repo/my-app:v3"
       ports {
         container_port = 8080
       }
@@ -128,7 +128,7 @@ resource "google_compute_instance" "my_app_vm" {
       spec:
         containers:
         - name: my-app-vm
-          image: us-central1-docker.pkg.dev/demo1-500618/my-app-repo/my-app:v1
+          image: us-central1-docker.pkg.dev/demo1-500618/my-app-repo/my-app:v3
           ports:
           - containerPort: 8080
         restartPolicy: Always
