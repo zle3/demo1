@@ -11,8 +11,6 @@ METADATA_BASE = "http://metadata.google.internal/computeMetadata/v1"
 def verify():
     info = {}
 
-    # GCP proof: this metadata server only answers from inside a real GCP
-    # VM or Cloud Run instance, it's not reachable from anywhere else.
     try:
         project = requests.get(f"{METADATA_BASE}/project/project-id",
                                 headers=METADATA_HEADERS, timeout=2).text
@@ -28,15 +26,11 @@ def verify():
         info["gcp_verified"] = False
         info["gcp_error"] = str(e)
 
-    # Compute platform proof: Cloud Run injects these env vars automatically,
-    # a Compute Engine VM never has them.
     k_service = os.environ.get("K_SERVICE")
     info["platform"] = "Cloud Run" if k_service else "Compute Engine"
     info["k_service"] = k_service
     info["k_revision"] = os.environ.get("K_REVISION")
 
-    # Cloudflare proof: these headers are injected by Cloudflare's edge,
-    # they don't exist on a request that skipped Cloudflare.
     cf_ray = request.headers.get("CF-Ray")
     info["cloudflare_verified"] = cf_ray is not None
     info["cf_ray"] = cf_ray
@@ -113,6 +107,12 @@ PAGE = """
   .pill.unverified { background: rgb(var(--color-neutral-700)); color: rgb(var(--color-neutral-400)); }
   .pill.verified { background: rgb(var(--color-secondary-300)); color: white; }
 
+  .reveal {
+    cursor: pointer;
+    color: rgb(var(--color-primary-300));
+    border-bottom: 1px dashed rgb(var(--color-primary-400));
+  }
+
   a.repo {
     display: inline-flex; align-items: center; gap: 8px;
     background: rgb(var(--color-neutral-800));
@@ -123,6 +123,8 @@ PAGE = """
   }
   a.repo:hover { border-color: rgb(var(--color-primary-400)); }
   footer { margin-top: 48px; color: rgb(var(--color-neutral-700)); font-size: 12px; }
+  footer a { color: rgb(var(--color-neutral-400)); text-decoration: none; }
+  footer a:hover { color: rgb(var(--color-primary-300)); }
 </style>
 </head>
 <body>
@@ -159,10 +161,12 @@ PAGE = """
     </div>
 
     <a class="repo" href="https://github.com/zle3/demo1" target="_blank" rel="noopener">View source on GitHub &rarr;</a>
-    <footer>built by Zach Le &middot; terraform &middot; docker &middot; gcp &middot; cloudflare</footer>
+    <footer>built by <a href="https://zachle.info" target="_blank" rel="noopener">Zach Le</a> &middot; terraform &middot; docker &middot; gcp &middot; cloudflare</footer>
   </div>
 
 <script>
+let lastIp = null;
+
 async function runVerify() {
   const btn = document.getElementById('verifyBtn');
   btn.disabled = true;
@@ -187,8 +191,9 @@ async function runVerify() {
 
     if (data.cloudflare_verified) {
       setPill('cf', true);
+      lastIp = data.cf_connecting_ip;
       document.getElementById('desc-cf').innerHTML =
-        `CF-Ray: <code>${data.cf_ray}</code><br>Your IP per Cloudflare: <code>${data.cf_connecting_ip}</code><br>Detected country: <code>${data.cf_country}</code>`;
+        `CF-Ray: <code>${data.cf_ray}</code><br>Your IP per Cloudflare: <span class="reveal" onclick="revealIp(this)">click to reveal</span><br>Detected country: <code>${data.cf_country}</code>`;
     } else {
       setPill('cf', false);
       document.getElementById('desc-cf').textContent = 'No CF-Ray header present, this request did not pass through Cloudflare.';
@@ -199,6 +204,10 @@ async function runVerify() {
     return;
   }
   btn.textContent = 'Verified';
+}
+
+function revealIp(el) {
+  el.outerHTML = `<code>${lastIp}</code>`;
 }
 
 function setPill(key, ok) {
