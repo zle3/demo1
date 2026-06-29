@@ -145,3 +145,51 @@ resource "google_service_account" "vm_runtime" {
   account_id   = "my-app-vm-runtime"
   display_name = "My App VM Runtime"
 }
+
+resource "google_compute_region_network_endpoint_group" "cloudrun_neg" {
+  name                  = "cloudrun-neg"
+  network_endpoint_type = "SERVERLESS"
+  region                = var.region
+  cloud_run {
+    service = google_cloud_run_v2_service.my_app.name
+  }
+}
+
+resource "google_compute_backend_service" "my_app_backend" {
+  name                  = "my-app-backend"
+  load_balancing_scheme = "EXTERNAL_MANAGED"
+
+  backend {
+    group = google_compute_region_network_endpoint_group.cloudrun_neg.id
+  }
+}
+
+resource "google_compute_url_map" "my_app_url_map" {
+  name            = "my-app-url-map"
+  default_service = google_compute_backend_service.my_app_backend.id
+}
+
+resource "google_compute_managed_ssl_certificate" "my_app_cert" {
+  name = "my-app-cert"
+  managed {
+    domains = ["demo1.zachle.info"]
+  }
+}
+
+resource "google_compute_target_https_proxy" "my_app_https_proxy" {
+  name             = "my-app-https-proxy"
+  url_map          = google_compute_url_map.my_app_url_map.id
+  ssl_certificates = [google_compute_managed_ssl_certificate.my_app_cert.id]
+}
+
+resource "google_compute_global_address" "my_app_lb_ip" {
+  name = "my-app-lb-ip"
+}
+
+resource "google_compute_global_forwarding_rule" "my_app_forwarding_rule" {
+  name                  = "my-app-forwarding-rule"
+  target                = google_compute_target_https_proxy.my_app_https_proxy.id
+  port_range            = "443"
+  ip_address            = google_compute_global_address.my_app_lb_ip.id
+  load_balancing_scheme = "EXTERNAL_MANAGED"
+}
