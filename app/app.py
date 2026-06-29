@@ -114,6 +114,26 @@ def docker_info():
     return jsonify(info)
 
 
+@app.route("/api/db")
+def db_info():
+    info = {
+        "instance_connection_name": DB_INSTANCE_CONNECTION_NAME,
+        "ip_type": "PRIVATE",
+    }
+    try:
+        engine = get_engine()
+        start = time.time()
+        with engine.connect() as conn:
+            count = conn.execute(sqlalchemy.text("SELECT COUNT(*) FROM visits")).scalar()
+        info["connected"] = True
+        info["latency_ms"] = round((time.time() - start) * 1000, 1)
+        info["total_visits"] = count
+    except Exception as e:
+        info["connected"] = False
+        info["error"] = str(e)
+    return jsonify(info)
+
+
 @app.route("/api/builds")
 def builds():
     try:
@@ -377,6 +397,14 @@ PAGE = """
         <div class="title">Cloudflare <span class="pill unverified" id="pill-cf">checking...</span></div>
         <div class="desc" id="desc-cf">Inspecting the request headers Cloudflare injects at the edge.</div>
       </div>
+      <div class="card" id="card-docker">
+        <div class="title">Docker <span class="pill unverified" id="pill-docker">checking...</span></div>
+        <div class="desc" id="desc-docker">Checking for container-runtime markers (hostname, cgroup namespace, /.dockerenv).</div>
+      </div>
+      <div class="card" id="card-db">
+        <div class="title">Cloud SQL <span class="pill unverified" id="pill-db">checking...</span></div>
+        <div class="desc" id="desc-db">Connecting over the instance's private IP and timing a live query.</div>
+      </div>
     </div>
 
     <h2 class="section">Infrastructure as Code</h2>
@@ -384,14 +412,6 @@ PAGE = """
       <div class="card">
         <div class="title">Provisioning</div>
         <div class="desc">Every resource above defined as code in Terraform, planned before applied.</div>
-      </div>
-    </div>
-
-    <h2 class="section">Containerization</h2>
-    <div class="grid">
-      <div class="card" id="card-docker">
-        <div class="title">Docker <span class="pill unverified" id="pill-docker">checking...</span></div>
-        <div class="desc" id="desc-docker">Checking for container-runtime markers (hostname, cgroup namespace, /.dockerenv).</div>
       </div>
     </div>
 
@@ -472,6 +492,30 @@ async function runDockerCheck() {
   } catch (e) {
     setPill('docker', false);
     document.getElementById('desc-docker').textContent = 'Could not reach /api/docker.';
+    console.error(e);
+  }
+}
+
+async function runDbCheck() {
+  try {
+    const res = await fetch('/api/db');
+    const data = await res.json();
+    setPill('db', !!data.connected);
+    if (data.connected) {
+      document.getElementById('desc-db').innerHTML =
+        `Instance: <code>${data.instance_connection_name}</code><br>` +
+        `IP type: <code>${data.ip_type}</code><br>` +
+        `Query latency: <code>${data.latency_ms}ms</code><br>` +
+        `Rows in visits table: <code>${data.total_visits}</code>`;
+    } else {
+      document.getElementById('desc-db').innerHTML =
+        `Instance: <code>${data.instance_connection_name}</code><br>` +
+        `IP type: <code>${data.ip_type}</code><br>` +
+        `Connection failed: ${data.error}`;
+    }
+  } catch (e) {
+    setPill('db', false);
+    document.getElementById('desc-db').textContent = 'Could not reach /api/db.';
     console.error(e);
   }
 }
@@ -580,6 +624,7 @@ window.addEventListener('DOMContentLoaded', () => {
   recordVisit();
   runVerify();
   runDockerCheck();
+  runDbCheck();
 });
 
 function revealIp(el) {
