@@ -5,6 +5,8 @@ from flask import Flask, jsonify, request, send_from_directory
 import requests
 from google.cloud.devtools import cloudbuild_v1
 from google.cloud import monitoring_v3
+from google.cloud.sql.connector import Connector
+import sqlalchemy
 
 app = Flask(__name__)
 
@@ -12,6 +14,39 @@ METADATA_HEADERS = {"Metadata-Flavor": "Google"}
 METADATA_BASE = "http://metadata.google.internal/computeMetadata/v1"
 PROJECT_ID = "demo1-500618"
 REGION = "us-central1"
+
+DB_INSTANCE_CONNECTION_NAME = "demo1-500618:us-central1:demo1-postgres"
+DB_NAME = "demo1"
+DB_USER = "app_user"
+DB_PASS = os.environ.get("DB_PASSWORD")
+
+_connector = Connector()
+_engine = None
+
+
+def get_db_engine():
+    def getconn():
+        return _connector.connect(
+            DB_INSTANCE_CONNECTION_NAME,
+            "pg8000",
+            user=DB_USER,
+            password=DB_PASS,
+            db=DB_NAME,
+        )
+    return sqlalchemy.create_engine("postgresql+pg8000://", creator=getconn)
+
+
+def get_engine():
+    global _engine
+    if _engine is None:
+        _engine = get_db_engine()
+        with _engine.connect() as conn:
+            conn.execute(sqlalchemy.text(
+                "CREATE TABLE IF NOT EXISTS visits (id SERIAL PRIMARY KEY, visited_at TIMESTAMPTZ DEFAULT now())"
+            ))
+            conn.commit()
+    return _engine
+
 
 @app.route("/api/verify")
 def verify():
@@ -107,6 +142,30 @@ def uptime_history():
         return jsonify({"ok": False, "error": str(e)})
 
 
+@app.route("/api/visit", methods=["POST"])
+def record_visit():
+    try:
+        engine = get_engine()
+        with engine.connect() as conn:
+            conn.execute(sqlalchemy.text("INSERT INTO visits DEFAULT VALUES"))
+            conn.commit()
+            count = conn.execute(sqlalchemy.text("SELECT COUNT(*) FROM visits")).scalar()
+        return jsonify({"ok": True, "total_visits": count})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/visits")
+def get_visits():
+    try:
+        engine = get_engine()
+        with engine.connect() as conn:
+            count = conn.execute(sqlalchemy.text("SELECT COUNT(*) FROM visits")).scalar()
+        return jsonify({"ok": True, "total_visits": count})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
 PAGE = """
 <!DOCTYPE html>
 <html lang="en">
@@ -195,6 +254,16 @@ PAGE = """
   .statusbar-labels { display: flex; justify-content: space-between; font-size: 11px; color: rgb(var(--color-neutral-400)); margin-top: 6px; }
   .statusbar-summary { font-size: 13px; color: rgb(var(--color-neutral-400)); margin-top: 8px; }
 
+  .visits-banner {
+    background: rgb(var(--color-neutral-800));
+    border: 1px solid rgb(var(--color-neutral-700));
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 36px;
+    text-align: left;
+  }
+  .visits-banner .count { color: rgb(var(--color-primary-300)); font-weight: 700; font-size: 20px; }
+
   a.repo {
     display: inline-flex; align-items: center; gap: 8px;
     background: rgb(var(--color-neutral-800));
@@ -219,6 +288,8 @@ PAGE = """
       containerized with Docker, and fronted by Cloudflare.
       <a href="https://github.com/zle3/demo1" target="_blank" rel="noopener">Full source and Terraform code on GitHub</a>.
     </p>
+
+    <div class="visits-banner" id="visitsBanner">Recording visit...</div>
 
     <button class="verify" id="verifyBtn" onclick="runVerify()">Verify this is really running on GCP + Cloudflare</button>
 
@@ -358,7 +429,27 @@ async function loadUptimeHistory() {
     console.error(e);
   }
 }
-window.addEventListener('DOMContentLoaded', loadUptimeHistory);
+
+async function recordVisit() {
+  const banner = document.getElementById('visitsBanner');
+  try {
+    const res = await fetch('/api/visit', { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) {
+      banner.innerHTML = `<span class="count">${data.total_visits}</span> total visits recorded in Cloud SQL`;
+    } else {
+      banner.textContent = 'Could not reach Cloud SQL: ' + data.error;
+    }
+  } catch (e) {
+    banner.textContent = 'Failed to record visit.';
+    console.error(e);
+  }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  loadUptimeHistory();
+  recordVisit();
+});
 
 function revealIp(el) {
   el.outerHTML = `<code>${lastIp}</code>`;

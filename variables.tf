@@ -17,3 +17,8 @@ variable "my_app_image_tag" {
   type    = string
   default = "v4"
 }
+
+variable "db_password" {
+  type      = string
+  sensitive = true
+}

@@ -95,7 +95,28 @@ resource "google_cloud_run_v2_service" "my_app" {
       ports {
         container_port = 8080
       }
+
+      env {
+        name = "DB_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.db_password.secret_id
+            version = "latest"
+          }
+        }
+      }
     }
+
+    vpc_access {
+      connector = google_vpc_access_connector.connector.id
+      egress    = "PRIVATE_RANGES_ONLY"
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [
+      template[0].containers[0].image,
+    ]
   }
 }
 
@@ -248,4 +269,102 @@ resource "google_monitoring_uptime_check_config" "site" {
       host       = "demo1.zachle.info"
     }
   }
+}
+
+resource "google_project_service" "servicenetworking" {
+  project = "demo1-500618"
+  service = "servicenetworking.googleapis.com"
+}
+
+resource "google_compute_global_address" "private_ip_range" {
+  name          = "cloudsql-private-ip-range"
+  purpose       = "VPC_PEERING"
+  address_type  = "INTERNAL"
+  prefix_length = 16
+  network       = google_compute_network.main.id
+}
+
+resource "google_service_networking_connection" "private_vpc_connection" {
+  network                 = google_compute_network.main.id
+  service                 = "servicenetworking.googleapis.com"
+  reserved_peering_ranges = [google_compute_global_address.private_ip_range.name]
+  depends_on              = [google_project_service.servicenetworking]
+}
+
+resource "google_sql_database_instance" "main" {
+  name             = "demo1-postgres"
+  database_version = "POSTGRES_15"
+  region           = "us-central1"
+  project          = "demo1-500618"
+
+  depends_on = [google_service_networking_connection.private_vpc_connection]
+
+  settings {
+    tier              = "db-f1-micro"
+    availability_type = "ZONAL"
+    disk_size         = 10
+    disk_type         = "PD_SSD"
+
+    ip_configuration {
+      ipv4_enabled    = false
+      private_network = google_compute_network.main.id
+    }
+
+    backup_configuration {
+      enabled = true
+    }
+  }
+
+  deletion_protection = false
+}
+
+resource "google_sql_database" "app_db" {
+  name     = "demo1"
+  instance = google_sql_database_instance.main.name
+}
+
+resource "google_sql_user" "app_user" {
+  name     = "app_user"
+  instance = google_sql_database_instance.main.name
+  password = var.db_password
+}
+
+resource "google_vpc_access_connector" "connector" {
+  name          = "demo1-vpc-connector"
+  region        = "us-central1"
+  network       = google_compute_network.main.name
+  ip_cidr_range = "10.8.0.0/28"
+
+  depends_on = [google_service_networking_connection.private_vpc_connection]
+}
+
+resource "google_project_iam_member" "cloudrun_sql_client" {
+  project = "demo1-500618"
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:543077399900-compute@developer.gserviceaccount.com"
+}
+
+resource "google_project_iam_member" "vm_sql_client" {
+  project = "demo1-500618"
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.vm_runtime.email}"
+}
+
+resource "google_secret_manager_secret" "db_password" {
+  secret_id = "demo1-db-password"
+
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "db_password" {
+  secret      = google_secret_manager_secret.db_password.id
+  secret_data = var.db_password
+}
+
+resource "google_secret_manager_secret_iam_member" "cloudrun_secret_access" {
+  secret_id = google_secret_manager_secret.db_password.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:543077399900-compute@developer.gserviceaccount.com"
 }

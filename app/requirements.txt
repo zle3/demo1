@@ -2,3 +2,5 @@ flask
 requests
 google-cloud-build
 google-cloud-monitoring
+cloud-sql-python-connector[pg8000]
+SQLAlchemy
