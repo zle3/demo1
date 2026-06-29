@@ -100,7 +100,7 @@ def docker_info():
             cgroup_content = f.read().strip()
         info["cgroup_excerpt"] = cgroup_content.splitlines()[:5]
         info["containerized"] = any(
-            kw in cgroup_content for kw in ("docker", "containerd", "kubepods")
+            kw in cgroup_content for kw in ("docker", "containerd", "kubepods", "container")
         )
     except Exception as e:
         info["cgroup_excerpt"] = []
@@ -265,8 +265,8 @@ PAGE = """
   .card .title { color: rgb(var(--color-neutral-200)); font-weight: 700; font-size: 15px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
   .card .desc { color: rgb(var(--color-neutral-400)); font-size: 13px; line-height: 1.6; }
   .card .desc code { color: rgb(var(--color-primary-300)); font-size: 12px; word-break: break-all; }
-  .card .desc code.ip { word-break: normal; white-space: nowrap; display: inline-block; }
-  .ip-row { display: flex; justify-content: space-between; align-items: center; margin-top: 2px; }
+  .card .desc code.ip { word-break: normal; white-space: nowrap; display: inline-block; margin-left: 4px; }
+  .ip-row { margin-top: 2px; }
   .pill { font-size: 10px; padding: 2px 8px; border-radius: 20px; font-weight: 700; }
   .pill.unverified { background: rgb(var(--color-neutral-700)); color: rgb(var(--color-neutral-400)); }
   .pill.verified { background: rgb(var(--color-success)); color: white; }
@@ -275,6 +275,7 @@ PAGE = """
     cursor: pointer;
     color: rgb(var(--color-primary-300));
     border-bottom: 1px dashed rgb(var(--color-primary-400));
+    margin-left: 4px;
   }
 
   .buildrow { margin-bottom: 10px; }
@@ -458,13 +459,13 @@ async function runDockerCheck() {
   try {
     const res = await fetch('/api/docker');
     const data = await res.json();
-    const ok = data.dockerenv_present || data.containerized;
+    const ok = data.dockerenv_present || data.containerized || !!data.k_service;
     setPill('docker', !!ok);
     const cgroupLines = (data.cgroup_excerpt || []).join('<br>');
     document.getElementById('desc-docker').innerHTML =
       `Hostname (container ID-style): <code>${data.hostname}</code><br>` +
       `/.dockerenv present: <code>${data.dockerenv_present}</code><br>` +
-      `cgroup namespace match: <code>${data.containerized}</code><br>` +
+      `cgroup namespace isolated: <code>${data.containerized}</code><br>` +
       (cgroupLines ? `cgroup excerpt:<br><code>${cgroupLines}</code><br>` : '') +
       `PID inside container: <code>${data.pid}</code>` +
       (data.k_revision ? `<br>Cloud Run revision (built from this image): <code>${data.k_revision}</code>` : '');
