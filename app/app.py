@@ -1,11 +1,14 @@
 import os
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 import requests
+from google.cloud.devtools import cloudbuild_v1
 
 app = Flask(__name__)
 
 METADATA_HEADERS = {"Metadata-Flavor": "Google"}
 METADATA_BASE = "http://metadata.google.internal/computeMetadata/v1"
+PROJECT_ID = "demo1-500618"
+REGION = "us-central1"
 
 @app.route("/api/verify")
 def verify():
@@ -38,6 +41,28 @@ def verify():
     info["cf_country"] = request.headers.get("CF-IPCountry")
 
     return jsonify(info)
+
+
+@app.route("/api/builds")
+def builds():
+    try:
+        client = cloudbuild_v1.CloudBuildClient()
+        request_obj = cloudbuild_v1.ListBuildsRequest(
+            project_id=PROJECT_ID,
+            parent=f"projects/{PROJECT_ID}/locations/{REGION}",
+            page_size=5,
+        )
+        results = []
+        for build in client.list_builds(request=request_obj):
+            results.append({
+                "id": build.id[:8],
+                "status": build.status.name,
+                "sha": build.substitutions.get("SHORT_SHA", "manual"),
+                "create_time": build.create_time.isoformat() if build.create_time else None,
+            })
+        return jsonify({"ok": True, "builds": results})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
 
 
 PAGE = """
@@ -113,6 +138,8 @@ PAGE = """
     border-bottom: 1px dashed rgb(var(--color-primary-400));
   }
 
+  .buildrow { margin-bottom: 10px; }
+
   a.repo {
     display: inline-flex; align-items: center; gap: 8px;
     background: rgb(var(--color-neutral-800));
@@ -160,6 +187,10 @@ PAGE = """
       </div>
     </div>
 
+    <h2 class="section">CI/CD Pipeline</h2>
+    <button class="verify" id="buildsBtn" onclick="loadBuilds()">Load recent Cloud Build runs</button>
+    <div id="buildsList" style="text-align:left; margin-bottom:36px;"></div>
+
     <a class="repo" href="https://github.com/zle3/demo1" target="_blank" rel="noopener">View source on GitHub &rarr;</a>
     <footer>built by <a href="https://zachle.info" target="_blank" rel="noopener">Zach Le</a> &middot; terraform &middot; docker &middot; gcp &middot; cloudflare</footer>
   </div>
@@ -206,6 +237,35 @@ async function runVerify() {
   btn.textContent = 'Verified';
 }
 
+async function loadBuilds() {
+  const btn = document.getElementById('buildsBtn');
+  const list = document.getElementById('buildsList');
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  try {
+    const res = await fetch('/api/builds');
+    const data = await res.json();
+    if (!data.ok) {
+      list.innerHTML = `<div class="card">Could not load builds: ${data.error}</div>`;
+    } else {
+      list.innerHTML = data.builds.map(b => `
+        <div class="card buildrow">
+          <div class="title">
+            build ${b.id}
+            <span class="pill ${b.status === 'SUCCESS' ? 'verified' : 'unverified'}">${b.status}</span>
+          </div>
+          <div class="desc">commit: <code>${b.sha}</code><br>started: <code>${b.create_time || 'n/a'}</code></div>
+        </div>
+      `).join('');
+    }
+  } catch (e) {
+    list.innerHTML = '<div class="card">Failed to load build history.</div>';
+    console.error(e);
+  }
+  btn.disabled = false;
+  btn.textContent = 'Refresh';
+}
+
 function revealIp(el) {
   el.outerHTML = `<code>${lastIp}</code>`;
 }
@@ -227,7 +287,6 @@ def home():
 
 @app.route("/favicon.ico")
 def favicon():
-    from flask import send_from_directory
     return send_from_directory(os.path.join(app.root_path, "static"), "favicon.ico")
 
 if __name__ == "__main__":
