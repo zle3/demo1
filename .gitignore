@@ -1,0 +1,66 @@
+# Terraform
+
+# Local .terraform directories (downloaded providers/modules, can be large)
+**/.terraform/*
+
+# Terraform state files (contain resource IDs and sometimes sensitive values
+# like generated passwords or connection strings, never commit these)
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Crash log files
+crash.log
+crash.*.log
+
+# Exclude all .tfvars files, since these usually contain project-specific or
+# sensitive values (project IDs, API tokens, account-specific settings).
+# If you want to share an example file, name it terraform.tfvars.example
+# and commit that instead.
+*.tfvars
+*.tfvars.json
+
+# Ignore override files, used for local-only overrides of main config
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Include override files you do want to commit using negated pattern
+# !example_override.tf
+
+# Ignore CLI configuration files
+.terraformrc
+terraform.rc
+
+# Lock file: opinions differ on this one. For an application repo, commit it
+# (ensures everyone/CI uses the same provider versions). For a reusable
+# module meant to support multiple provider versions, ignore it instead.
+# Left commented out so the lock file is committed by default:
+# .terraform.lock.hcl
+
+# Provider/plugin cache
+.terraform.lock.hcl.bak
+
+# Cloudflare / GCP credentials, in case you ever drop a key file locally
+*.json
+!package.json
+!package-lock.json
+*.pem
+*.key
+gcp-credentials*.json
+service-account*.json
+
+# Environment variable files
+.env
+.env.*
+
+# OS and editor clutter
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
