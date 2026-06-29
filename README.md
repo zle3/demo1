@@ -4,7 +4,7 @@ quick demo project showcasing terraform in gcp to create a vpc
 
 link to demo site below:
 
-[demo1.zachle.info](demo1.zachle.info)
+[demo1.zachle.info](https://demo1.zachle.info)
 
 ## what's included
 
