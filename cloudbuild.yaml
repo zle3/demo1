@@ -1,0 +1,49 @@
+steps:
+  # Step 1: install dependencies and run a basic syntax/import check.
+  # This is a placeholder for "lint/test" since the app doesn't have a real
+  # test suite yet, it at least catches a broken build before it gets
+  # packaged into an image.
+  - name: 'python:3.12-slim'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        cd app
+        pip install --no-cache-dir -r requirements.txt
+        python -c "import app"
+    id: 'lint-and-test'
+
+  # Step 2: build the Docker image, tagged with the short commit SHA so every
+  # build produces a unique, traceable image instead of overwriting "latest".
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/my-app-repo/my-app:$SHORT_SHA'
+      - './app'
+    id: 'build-image'
+    waitFor: ['lint-and-test']
+
+  # Step 3: push it to Artifact Registry.
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/my-app-repo/my-app:$SHORT_SHA'
+    id: 'push-image'
+    waitFor: ['build-image']
+
+  # Step 4: deploy that exact image tag to Cloud Run.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'my-app-service'
+      - '--image=us-central1-docker.pkg.dev/$PROJECT_ID/my-app-repo/my-app:$SHORT_SHA'
+      - '--region=us-central1'
+      - '--platform=managed'
+    id: 'deploy-cloud-run'
+    waitFor: ['push-image']
+
+options:
+  logging: CLOUD_LOGGING_ONLY

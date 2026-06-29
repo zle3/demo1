@@ -193,3 +193,18 @@ resource "google_compute_global_forwarding_rule" "my_app_forwarding_rule" {
   ip_address            = google_compute_global_address.my_app_lb_ip.id
   load_balancing_scheme = "EXTERNAL_MANAGED"
 }
+
+resource "google_cloudbuildv2_connection" "github" {
+  location = var.region
+  name     = "github-connection"
+  # Note: the GitHub OAuth authorization itself can't be created by Terraform,
+  # this resource just lets Terraform manage/reference the connection you
+  # already authorized through the console.
+}
+
+resource "google_cloudbuildv2_repository" "demo1" {
+  location          = var.region
+  name              = "demo1-repo"
+  parent_connection = google_cloudbuildv2_connection.github.name
+  remote_uri        = "https://github.com/zle3/demo1.git"
+}
