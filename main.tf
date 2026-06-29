@@ -105,3 +105,43 @@ resource "google_cloud_run_v2_service_iam_member" "public_access" {
   role     = "roles/run.invoker"
   member   = "allUsers"
 }
+
+resource "google_compute_instance" "my_app_vm" {
+  name         = "my-app-vm"
+  machine_type = "e2-small"
+  zone         = "us-central1-a"
+  tags         = ["ssh-allowed"]
+
+  boot_disk {
+    initialize_params {
+      image = "projects/cos-cloud/global/images/family/cos-stable"
+    }
+  }
+
+  network_interface {
+    subnetwork = google_compute_subnetwork.private.id
+    # no access_config block, intentionally, this VM gets no external IP
+  }
+
+  metadata = {
+    gce-container-declaration = <<-EOT
+      spec:
+        containers:
+        - name: my-app-vm
+          image: us-central1-docker.pkg.dev/demo1-500618/my-app-repo/my-app:v1
+          ports:
+          - containerPort: 8080
+        restartPolicy: Always
+    EOT
+  }
+
+  service_account {
+    email  = google_service_account.vm_runtime.email
+    scopes = ["cloud-platform"]
+  }
+}
+
+resource "google_service_account" "vm_runtime" {
+  account_id   = "my-app-vm-runtime"
+  display_name = "My App VM Runtime"
+}
