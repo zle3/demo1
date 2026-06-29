@@ -77,3 +77,31 @@ resource "google_compute_firewall" "allow_internal" {
 
   source_ranges = ["10.0.0.0/16"]
 }
+
+resource "google_artifact_registry_repository" "my_app_repo" {
+  location      = var.region
+  repository_id = "my-app-repo"
+  format        = "DOCKER"
+  description   = "Docker images for the GCP project"
+}
+
+resource "google_cloud_run_v2_service" "my_app" {
+  name     = "my-app-service"
+  location = var.region
+
+  template {
+    containers {
+      image = "us-central1-docker.pkg.dev/demo1-500618/my-app-repo/my-app:v1"
+      ports {
+        container_port = 8080
+      }
+    }
+  }
+}
+
+resource "google_cloud_run_v2_service_iam_member" "public_access" {
+  location = google_cloud_run_v2_service.my_app.location
+  name     = google_cloud_run_v2_service.my_app.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
