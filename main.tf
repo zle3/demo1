@@ -195,11 +195,12 @@ resource "google_compute_global_forwarding_rule" "my_app_forwarding_rule" {
 }
 
 resource "google_cloudbuildv2_connection" "github" {
-  location = var.region
+  location = "us-central1"
   name     = "github-connection"
-  # Note: the GitHub OAuth authorization itself can't be created by Terraform,
-  # this resource just lets Terraform manage/reference the connection you
-  # already authorized through the console.
+
+  lifecycle {
+    ignore_changes = [github_config]
+  }
 }
 
 resource "google_cloudbuildv2_repository" "demo1" {
@@ -207,4 +208,23 @@ resource "google_cloudbuildv2_repository" "demo1" {
   name              = "demo1-repo"
   parent_connection = google_cloudbuildv2_connection.github.name
   remote_uri        = "https://github.com/zle3/demo1.git"
+}
+
+resource "google_cloudbuild_trigger" "demo1_main" {
+  name            = "demo1-main-trigger"
+  location        = var.region
+  service_account = "projects/demo1-500618/serviceAccounts/cloudbuild-runner@demo1-500618.iam.gserviceaccount.com"
+  
+  repository_event_config {
+    repository = "projects/demo1-500618/locations/us-central1/connections/github-connection/repositories/demo1-repo"
+    push {
+      branch = "^main$"
+    }
+  }
+
+  filename = "cloudbuild.yaml"
+
+  approval_config {
+    approval_required = true
+  }
 }
