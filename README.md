@@ -10,11 +10,15 @@ link to demo site below:
 
 public + private subnets
 
-cloud router + NAT
+cloud router + nat
 
-firewall rule for IAP SSH access only, no exposed ports
+firewall rule for iap ssh access only, no exposed ports
 
 vpc logging
+
+compute engine vm, for comparison against cloud run
+
+dedicated service account for the vm, scoped to artifact registry read only
 
 ## setup
 
@@ -22,15 +26,21 @@ authentication handled by service account "terraform-deployer" with least privil
 
 state stored in gcs bucket with versioning
 
+gitignored state, tfvars, and key files
+
+docker image built and pushed to artifact registry
+
 sample docker python application hosted on cloud run
 
-ssl certificate from google with a full strict TLS cloudflare proxy
+gcp load balancer enabled
+
+ssl certificate from google with a full strict tls cloudflare proxy
 
 dns hosted on cloudflare
 
-## TODO
+website front end with gcp/cloudflare verification checks
 
-docker, VMs, load balancer
+## TODO
 
 CI/CD workflows
 
