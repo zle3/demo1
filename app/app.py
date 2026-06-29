@@ -5,7 +5,7 @@ from flask import Flask, jsonify, request, send_from_directory
 import requests
 from google.cloud.devtools import cloudbuild_v1
 from google.cloud import monitoring_v3
-from google.cloud.sql.connector import Connector
+from google.cloud.sql.connector import Connector, IPTypes
 import sqlalchemy
 
 app = Flask(__name__)
@@ -32,6 +32,7 @@ def get_db_engine():
             user=DB_USER,
             password=DB_PASS,
             db=DB_NAME,
+            ip_type=IPTypes.PRIVATE,
         )
     return sqlalchemy.create_engine("postgresql+pg8000://", creator=getconn)
 
@@ -186,6 +187,7 @@ PAGE = """
     --color-primary-400: 186,153,170;
     --color-primary-500: 155,107,132;
     --color-secondary-300: 196,26,64;
+    --color-success: 90,168,110;
   }
   * { box-sizing: border-box; }
   body {
@@ -231,7 +233,7 @@ PAGE = """
   .card .desc code { color: rgb(var(--color-primary-300)); font-size: 12px; word-break: break-all; }
   .pill { font-size: 10px; padding: 2px 8px; border-radius: 20px; font-weight: 700; }
   .pill.unverified { background: rgb(var(--color-neutral-700)); color: rgb(var(--color-neutral-400)); }
-  .pill.verified { background: rgb(var(--color-secondary-300)); color: white; }
+  .pill.verified { background: rgb(var(--color-success)); color: white; }
 
   .reveal {
     cursor: pointer;
@@ -248,7 +250,7 @@ PAGE = """
     background: rgb(var(--color-neutral-700));
     cursor: pointer; position: relative;
   }
-  .statusbar-bar.up { background: #3fb950; }
+  .statusbar-bar.up { background: rgb(var(--color-success)); }
   .statusbar-bar.degraded { background: #d29922; }
   .statusbar-bar.down { background: rgb(var(--color-secondary-300)); }
   .statusbar-labels { display: flex; justify-content: space-between; font-size: 11px; color: rgb(var(--color-neutral-400)); margin-top: 6px; }
