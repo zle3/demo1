@@ -243,8 +243,25 @@ PAGE = """
 
   .buildrow { margin-bottom: 10px; }
 
-  .statusbar-wrap { text-align: left; margin-bottom: 36px; }
-  .statusbar-row { display: flex; gap: 2px; height: 36px; align-items: flex-end; }
+  .visits-banner {
+    background: rgb(var(--color-neutral-800));
+    border: 1px solid rgb(var(--color-neutral-700));
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 14px;
+    text-align: left;
+  }
+  .visits-banner .count { color: rgb(var(--color-primary-300)); font-weight: 700; font-size: 20px; }
+
+  .statusbar-wrap {
+    text-align: left;
+    margin-bottom: 36px;
+    background: rgb(var(--color-neutral-800));
+    border: 1px solid rgb(var(--color-neutral-700));
+    border-radius: 10px;
+    padding: 12px 20px;
+  }
+  .statusbar-row { display: flex; gap: 2px; height: 14px; align-items: flex-end; }
   .statusbar-bar {
     flex: 1; min-width: 3px; border-radius: 2px; height: 100%;
     background: rgb(var(--color-neutral-700));
@@ -254,17 +271,7 @@ PAGE = """
   .statusbar-bar.degraded { background: #d29922; }
   .statusbar-bar.down { background: rgb(var(--color-secondary-300)); }
   .statusbar-labels { display: flex; justify-content: space-between; font-size: 11px; color: rgb(var(--color-neutral-400)); margin-top: 6px; }
-  .statusbar-summary { font-size: 13px; color: rgb(var(--color-neutral-400)); margin-top: 8px; }
-
-  .visits-banner {
-    background: rgb(var(--color-neutral-800));
-    border: 1px solid rgb(var(--color-neutral-700));
-    border-radius: 10px;
-    padding: 16px 20px;
-    margin-bottom: 36px;
-    text-align: left;
-  }
-  .visits-banner .count { color: rgb(var(--color-primary-300)); font-weight: 700; font-size: 20px; }
+  .statusbar-summary { font-size: 13px; color: rgb(var(--color-neutral-400)); margin-top: 6px; }
 
   a.repo {
     display: inline-flex; align-items: center; gap: 8px;
@@ -293,21 +300,30 @@ PAGE = """
 
     <div class="visits-banner" id="visitsBanner">Recording visit...</div>
 
-    <button class="verify" id="verifyBtn" onclick="runVerify()">Verify this is really running on GCP + Cloudflare</button>
+    <div class="statusbar-wrap" id="statusbarWrap">
+      <div class="statusbar-row" id="statusbarRow"></div>
+      <div class="statusbar-labels">
+        <span id="statusbarOldest">30 days ago</span>
+        <span id="statusbarNewest">Today</span>
+      </div>
+      <div class="statusbar-summary" id="statusbarSummary">Loading uptime history...</div>
+    </div>
+
+    <button class="verify" id="verifyBtn" onclick="runVerify()">Re-verify GCP + Cloudflare</button>
 
     <h2 class="section">Stack</h2>
     <div class="grid" id="grid">
       <div class="card" id="card-gcp">
-        <div class="title">GCP <span class="pill unverified" id="pill-gcp">unverified</span></div>
-        <div class="desc" id="desc-gcp">Click verify to query GCP's internal metadata server, only reachable from inside a real GCP resource.</div>
+        <div class="title">GCP <span class="pill unverified" id="pill-gcp">checking...</span></div>
+        <div class="desc" id="desc-gcp">Querying GCP's internal metadata server, only reachable from inside a real GCP resource.</div>
       </div>
       <div class="card" id="card-compute">
-        <div class="title">Compute Platform <span class="pill unverified" id="pill-compute">unverified</span></div>
-        <div class="desc" id="desc-compute">Click verify to read the platform-specific environment this process is actually running in.</div>
+        <div class="title">Compute Platform <span class="pill unverified" id="pill-compute">checking...</span></div>
+        <div class="desc" id="desc-compute">Reading the platform-specific environment this process is actually running in.</div>
       </div>
       <div class="card" id="card-cf">
-        <div class="title">Cloudflare <span class="pill unverified" id="pill-cf">unverified</span></div>
-        <div class="desc" id="desc-cf">Click verify to inspect the request headers Cloudflare injects at the edge.</div>
+        <div class="title">Cloudflare <span class="pill unverified" id="pill-cf">checking...</span></div>
+        <div class="desc" id="desc-cf">Inspecting the request headers Cloudflare injects at the edge.</div>
       </div>
     </div>
 
@@ -322,16 +338,6 @@ PAGE = """
     <h2 class="section">CI/CD Pipeline</h2>
     <button class="verify" id="buildsBtn" onclick="loadBuilds()">Load recent Cloud Build runs</button>
     <div id="buildsList" style="text-align:left; margin-bottom:36px;"></div>
-
-    <h2 class="section">Uptime</h2>
-    <div class="statusbar-wrap" id="statusbarWrap">
-      <div class="statusbar-row" id="statusbarRow"></div>
-      <div class="statusbar-labels">
-        <span id="statusbarOldest">30 days ago</span>
-        <span id="statusbarNewest">Today</span>
-      </div>
-      <div class="statusbar-summary" id="statusbarSummary">Loading uptime history...</div>
-    </div>
 
     <a class="repo" href="https://github.com/zle3/demo1" target="_blank" rel="noopener">View source on GitHub &rarr;</a>
     <footer>built by <a href="https://zachle.info" target="_blank" rel="noopener">Zach Le</a> &middot; terraform &middot; docker &middot; gcp &middot; cloudflare</footer>
@@ -376,7 +382,8 @@ async function runVerify() {
     console.error(e);
     return;
   }
-  btn.textContent = 'Verified';
+  btn.disabled = false;
+  btn.textContent = 'Re-verify GCP + Cloudflare';
 }
 
 async function loadBuilds() {
@@ -451,6 +458,7 @@ async function recordVisit() {
 window.addEventListener('DOMContentLoaded', () => {
   loadUptimeHistory();
   recordVisit();
+  runVerify();
 });
 
 function revealIp(el) {
