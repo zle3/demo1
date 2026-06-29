@@ -244,11 +244,8 @@ resource "google_monitoring_uptime_check_config" "site" {
   monitored_resource {
     type = "uptime_url"
     labels = {
-      host = "demo1.zachle.info"
+      project_id = "demo1-500618"
+      host       = "demo1.zachle.info"
     }
   }
-}
-
-output "uptime_check_id" {
-  value = google_monitoring_uptime_check_config.site.uptime_check_id
 }
