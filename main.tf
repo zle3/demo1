@@ -214,7 +214,7 @@ resource "google_cloudbuild_trigger" "demo1_main" {
   name            = "demo1-main-trigger"
   location        = var.region
   service_account = "projects/demo1-500618/serviceAccounts/cloudbuild-runner@demo1-500618.iam.gserviceaccount.com"
-  
+
   repository_event_config {
     repository = "projects/demo1-500618/locations/us-central1/connections/github-connection/repositories/demo1-repo"
     push {
@@ -227,4 +227,28 @@ resource "google_cloudbuild_trigger" "demo1_main" {
   approval_config {
     approval_required = true
   }
+}
+
+resource "google_monitoring_uptime_check_config" "site" {
+  display_name = "demo1-site-uptime"
+  timeout      = "10s"
+  period       = "60s"
+
+  http_check {
+    path         = "/"
+    port         = 443
+    use_ssl      = true
+    validate_ssl = true
+  }
+
+  monitored_resource {
+    type = "uptime_url"
+    labels = {
+      host = "demo1.zachle.info"
+    }
+  }
+}
+
+output "uptime_check_id" {
+  value = google_monitoring_uptime_check_config.site.uptime_check_id
 }

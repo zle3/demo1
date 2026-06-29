@@ -1,7 +1,9 @@
 import os
+import time
 from flask import Flask, jsonify, request, send_from_directory
 import requests
 from google.cloud.devtools import cloudbuild_v1
+from google.cloud import monitoring_v3
 
 app = Flask(__name__)
 
@@ -61,6 +63,49 @@ def builds():
                 "create_time": build.create_time.isoformat() if build.create_time else None,
             })
         return jsonify({"ok": True, "builds": results})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/uptime")
+def uptime():
+    try:
+        client = monitoring_v3.MetricServiceClient()
+        project_name = f"projects/{PROJECT_ID}"
+        now = time.time()
+        interval = monitoring_v3.TimeInterval(
+            {
+                "end_time": {"seconds": int(now)},
+                "start_time": {"seconds": int(now - 86400)},  # last 24h
+            }
+        )
+        results = client.list_time_series(
+            request={
+                "name": project_name,
+                "filter": 'metric.type="monitoring.googleapis.com/uptime_check/check_passed"',
+                "interval": interval,
+                "view": monitoring_v3.ListTimeSeriesRequest.TimeSeriesView.FULL,
+            }
+        )
+
+        total, passed, last_status, last_time = 0, 0, None, None
+        for series in results:
+            for point in series.points:
+                total += 1
+                if point.value.bool_value:
+                    passed += 1
+                ts = point.interval.end_time.timestamp()
+                if last_time is None or ts > last_time:
+                    last_time = ts
+                    last_status = point.value.bool_value
+
+        pct = round((passed / total) * 100, 2) if total else None
+        return jsonify({
+            "ok": True,
+            "uptime_pct_24h": pct,
+            "checks": total,
+            "last_status": "UP" if last_status else "DOWN" if last_status is not None else "UNKNOWN",
+        })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
 
@@ -191,6 +236,10 @@ PAGE = """
     <button class="verify" id="buildsBtn" onclick="loadBuilds()">Load recent Cloud Build runs</button>
     <div id="buildsList" style="text-align:left; margin-bottom:36px;"></div>
 
+    <h2 class="section">Uptime</h2>
+    <button class="verify" id="uptimeBtn" onclick="loadUptime()">Load 24h uptime</button>
+    <div id="uptimeCard" style="text-align:left; margin-bottom:36px;"></div>
+
     <a class="repo" href="https://github.com/zle3/demo1" target="_blank" rel="noopener">View source on GitHub &rarr;</a>
     <footer>built by <a href="https://zachle.info" target="_blank" rel="noopener">Zach Le</a> &middot; terraform &middot; docker &middot; gcp &middot; cloudflare</footer>
   </div>
@@ -260,6 +309,39 @@ async function loadBuilds() {
     }
   } catch (e) {
     list.innerHTML = '<div class="card">Failed to load build history.</div>';
+    console.error(e);
+  }
+  btn.disabled = false;
+  btn.textContent = 'Refresh';
+}
+
+async function loadUptime() {
+  const btn = document.getElementById('uptimeBtn');
+  const card = document.getElementById('uptimeCard');
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  try {
+    const res = await fetch('/api/uptime');
+    const data = await res.json();
+    if (!data.ok) {
+      card.innerHTML = `<div class="card">Could not load uptime: ${data.error}</div>`;
+    } else {
+      const up = data.last_status === 'UP';
+      card.innerHTML = `
+        <div class="card">
+          <div class="title">
+            Last 24 hours
+            <span class="pill ${up ? 'verified' : 'unverified'}">${data.last_status}</span>
+          </div>
+          <div class="desc">
+            Uptime: <code>${data.uptime_pct_24h !== null ? data.uptime_pct_24h + '%' : 'n/a'}</code><br>
+            Checks recorded: <code>${data.checks}</code>
+          </div>
+        </div>
+      `;
+    }
+  } catch (e) {
+    card.innerHTML = '<div class="card">Failed to load uptime data.</div>';
     console.error(e);
   }
   btn.disabled = false;
