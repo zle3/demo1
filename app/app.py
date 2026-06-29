@@ -1,5 +1,6 @@
 import os
 import time
+from datetime import datetime, timezone
 from flask import Flask, jsonify, request, send_from_directory
 import requests
 from google.cloud.devtools import cloudbuild_v1
@@ -67,45 +68,41 @@ def builds():
         return jsonify({"ok": False, "error": str(e)})
 
 
-@app.route("/api/uptime")
-def uptime():
+@app.route("/api/uptime/history")
+def uptime_history():
+    days = int(request.args.get("days", 30))
     try:
         client = monitoring_v3.MetricServiceClient()
         project_name = f"projects/{PROJECT_ID}"
         now = time.time()
-        interval = monitoring_v3.TimeInterval(
-            {
-                "end_time": {"seconds": int(now)},
-                "start_time": {"seconds": int(now - 86400)},  # last 24h
-            }
-        )
+        interval = monitoring_v3.TimeInterval({
+            "end_time": {"seconds": int(now)},
+            "start_time": {"seconds": int(now - days * 86400)},
+        })
+        aggregation = monitoring_v3.Aggregation({
+            "alignment_period": {"seconds": 86400},
+            "per_series_aligner": monitoring_v3.Aggregation.Aligner.ALIGN_FRACTION_TRUE,
+        })
         results = client.list_time_series(
             request={
                 "name": project_name,
                 "filter": 'metric.type="monitoring.googleapis.com/uptime_check/check_passed"',
                 "interval": interval,
+                "aggregation": aggregation,
                 "view": monitoring_v3.ListTimeSeriesRequest.TimeSeriesView.FULL,
             }
         )
 
-        total, passed, last_status, last_time = 0, 0, None, None
+        day_buckets = {}
         for series in results:
             for point in series.points:
-                total += 1
-                if point.value.bool_value:
-                    passed += 1
-                ts = point.interval.end_time.timestamp()
-                if last_time is None or ts > last_time:
-                    last_time = ts
-                    last_status = point.value.bool_value
+                day = datetime.fromtimestamp(
+                    point.interval.end_time.timestamp(), tz=timezone.utc
+                ).strftime("%Y-%m-%d")
+                day_buckets[day] = round(point.value.double_value * 100, 2)
 
-        pct = round((passed / total) * 100, 2) if total else None
-        return jsonify({
-            "ok": True,
-            "uptime_pct_24h": pct,
-            "checks": total,
-            "last_status": "UP" if last_status else "DOWN" if last_status is not None else "UNKNOWN",
-        })
+        history = [{"date": d, "uptime_pct": day_buckets[d]} for d in sorted(day_buckets)]
+        return jsonify({"ok": True, "history": history})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
 
@@ -185,6 +182,19 @@ PAGE = """
 
   .buildrow { margin-bottom: 10px; }
 
+  .statusbar-wrap { text-align: left; margin-bottom: 36px; }
+  .statusbar-row { display: flex; gap: 2px; height: 36px; align-items: flex-end; }
+  .statusbar-bar {
+    flex: 1; min-width: 3px; border-radius: 2px; height: 100%;
+    background: rgb(var(--color-neutral-700));
+    cursor: pointer; position: relative;
+  }
+  .statusbar-bar.up { background: #3fb950; }
+  .statusbar-bar.degraded { background: #d29922; }
+  .statusbar-bar.down { background: rgb(var(--color-secondary-300)); }
+  .statusbar-labels { display: flex; justify-content: space-between; font-size: 11px; color: rgb(var(--color-neutral-400)); margin-top: 6px; }
+  .statusbar-summary { font-size: 13px; color: rgb(var(--color-neutral-400)); margin-top: 8px; }
+
   a.repo {
     display: inline-flex; align-items: center; gap: 8px;
     background: rgb(var(--color-neutral-800));
@@ -226,6 +236,10 @@ PAGE = """
         <div class="title">Cloudflare <span class="pill unverified" id="pill-cf">unverified</span></div>
         <div class="desc" id="desc-cf">Click verify to inspect the request headers Cloudflare injects at the edge.</div>
       </div>
+    </div>
+
+    <h2 class="section">Infrastructure as Code</h2>
+    <div class="grid">
       <div class="card">
         <div class="title">Provisioning</div>
         <div class="desc">Every resource above defined as code in Terraform, planned before applied.</div>
@@ -237,8 +251,14 @@ PAGE = """
     <div id="buildsList" style="text-align:left; margin-bottom:36px;"></div>
 
     <h2 class="section">Uptime</h2>
-    <button class="verify" id="uptimeBtn" onclick="loadUptime()">Load 24h uptime</button>
-    <div id="uptimeCard" style="text-align:left; margin-bottom:36px;"></div>
+    <div class="statusbar-wrap" id="statusbarWrap">
+      <div class="statusbar-row" id="statusbarRow"></div>
+      <div class="statusbar-labels">
+        <span id="statusbarOldest">30 days ago</span>
+        <span id="statusbarNewest">Today</span>
+      </div>
+      <div class="statusbar-summary" id="statusbarSummary">Loading uptime history...</div>
+    </div>
 
     <a class="repo" href="https://github.com/zle3/demo1" target="_blank" rel="noopener">View source on GitHub &rarr;</a>
     <footer>built by <a href="https://zachle.info" target="_blank" rel="noopener">Zach Le</a> &middot; terraform &middot; docker &middot; gcp &middot; cloudflare</footer>
@@ -315,38 +335,30 @@ async function loadBuilds() {
   btn.textContent = 'Refresh';
 }
 
-async function loadUptime() {
-  const btn = document.getElementById('uptimeBtn');
-  const card = document.getElementById('uptimeCard');
-  btn.disabled = true;
-  btn.textContent = 'Loading...';
+async function loadUptimeHistory() {
+  const row = document.getElementById('statusbarRow');
+  const summary = document.getElementById('statusbarSummary');
   try {
-    const res = await fetch('/api/uptime');
+    const res = await fetch('/api/uptime/history?days=30');
     const data = await res.json();
-    if (!data.ok) {
-      card.innerHTML = `<div class="card">Could not load uptime: ${data.error}</div>`;
-    } else {
-      const up = data.last_status === 'UP';
-      card.innerHTML = `
-        <div class="card">
-          <div class="title">
-            Last 24 hours
-            <span class="pill ${up ? 'verified' : 'unverified'}">${data.last_status}</span>
-          </div>
-          <div class="desc">
-            Uptime: <code>${data.uptime_pct_24h !== null ? data.uptime_pct_24h + '%' : 'n/a'}</code><br>
-            Checks recorded: <code>${data.checks}</code>
-          </div>
-        </div>
-      `;
+    if (!data.ok || data.history.length === 0) {
+      summary.textContent = 'No uptime data yet, check was just created.';
+      return;
     }
+    row.innerHTML = data.history.map(d => {
+      let cls = 'up';
+      if (d.uptime_pct < 100 && d.uptime_pct >= 95) cls = 'degraded';
+      if (d.uptime_pct < 95) cls = 'down';
+      return `<div class="statusbar-bar ${cls}" title="${d.date}: ${d.uptime_pct}%"></div>`;
+    }).join('');
+    const avg = (data.history.reduce((a, d) => a + d.uptime_pct, 0) / data.history.length).toFixed(2);
+    summary.textContent = `${avg}% average uptime over ${data.history.length} day(s) tracked`;
   } catch (e) {
-    card.innerHTML = '<div class="card">Failed to load uptime data.</div>';
+    summary.textContent = 'Failed to load uptime history.';
     console.error(e);
   }
-  btn.disabled = false;
-  btn.textContent = 'Refresh';
 }
+window.addEventListener('DOMContentLoaded', loadUptimeHistory);
 
 function revealIp(el) {
   el.outerHTML = `<code>${lastIp}</code>`;
