@@ -14,6 +14,7 @@ METADATA_HEADERS = {"Metadata-Flavor": "Google"}
 METADATA_BASE = "http://metadata.google.internal/computeMetadata/v1"
 PROJECT_ID = "demo1-500618"
 REGION = "us-central1"
+MAX_BUILDS = 20
 
 DB_INSTANCE_CONNECTION_NAME = "demo1-500618:us-central1:demo1-postgres"
 DB_NAME = "demo1"
@@ -82,6 +83,37 @@ def verify():
     return jsonify(info)
 
 
+@app.route("/api/docker")
+def docker_info():
+    info = {}
+
+    try:
+        info["hostname"] = os.uname().nodename
+    except Exception as e:
+        info["hostname"] = None
+        info["hostname_error"] = str(e)
+
+    info["dockerenv_present"] = os.path.exists("/.dockerenv")
+
+    try:
+        with open("/proc/1/cgroup", "r") as f:
+            cgroup_content = f.read().strip()
+        info["cgroup_excerpt"] = cgroup_content.splitlines()[:5]
+        info["containerized"] = any(
+            kw in cgroup_content for kw in ("docker", "containerd", "kubepods")
+        )
+    except Exception as e:
+        info["cgroup_excerpt"] = []
+        info["containerized"] = None
+        info["cgroup_error"] = str(e)
+
+    info["pid"] = os.getpid()
+    info["k_service"] = os.environ.get("K_SERVICE")
+    info["k_revision"] = os.environ.get("K_REVISION")
+
+    return jsonify(info)
+
+
 @app.route("/api/builds")
 def builds():
     try:
@@ -89,7 +121,7 @@ def builds():
         request_obj = cloudbuild_v1.ListBuildsRequest(
             project_id=PROJECT_ID,
             parent=f"projects/{PROJECT_ID}/locations/{REGION}",
-            page_size=5,
+            page_size=MAX_BUILDS,
         )
         results = []
         for build in client.list_builds(request=request_obj):
@@ -99,6 +131,8 @@ def builds():
                 "sha": build.substitutions.get("SHORT_SHA", "manual"),
                 "create_time": build.create_time.isoformat() if build.create_time else None,
             })
+            if len(results) >= MAX_BUILDS:
+                break
         return jsonify({"ok": True, "builds": results})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
@@ -206,8 +240,8 @@ PAGE = """
   }
   .dot {
     width: 7px; height: 7px; border-radius: 50%;
-    background: rgb(var(--color-secondary-300));
-    box-shadow: 0 0 8px rgb(var(--color-secondary-300));
+    background: rgb(var(--color-success));
+    box-shadow: 0 0 8px rgb(var(--color-success));
   }
   h1 { font-size: 32px; font-weight: 700; color: rgb(var(--color-neutral-200)); margin: 0 0 6px; }
   .role { color: rgb(var(--color-neutral-400)); font-size: 16px; margin-bottom: 24px; }
@@ -231,6 +265,8 @@ PAGE = """
   .card .title { color: rgb(var(--color-neutral-200)); font-weight: 700; font-size: 15px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
   .card .desc { color: rgb(var(--color-neutral-400)); font-size: 13px; line-height: 1.6; }
   .card .desc code { color: rgb(var(--color-primary-300)); font-size: 12px; word-break: break-all; }
+  .card .desc code.ip { word-break: normal; white-space: nowrap; display: inline-block; }
+  .ip-row { display: flex; justify-content: space-between; align-items: center; margin-top: 2px; }
   .pill { font-size: 10px; padding: 2px 8px; border-radius: 20px; font-weight: 700; }
   .pill.unverified { background: rgb(var(--color-neutral-700)); color: rgb(var(--color-neutral-400)); }
   .pill.verified { background: rgb(var(--color-success)); color: white; }
@@ -242,6 +278,21 @@ PAGE = """
   }
 
   .buildrow { margin-bottom: 10px; }
+
+  .pagination {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 36px;
+  }
+  .pagination button {
+    background: rgb(var(--color-neutral-800));
+    border: 1px solid rgb(var(--color-neutral-700));
+    color: rgb(var(--color-neutral-200));
+    font-weight: 600; font-size: 13px;
+    padding: 8px 16px; border-radius: 8px; cursor: pointer;
+  }
+  .pagination button:hover:not(:disabled) { border-color: rgb(var(--color-primary-400)); }
+  .pagination button:disabled { opacity: 0.4; cursor: default; }
+  .pagination .page-label { font-size: 13px; color: rgb(var(--color-neutral-400)); }
 
   .visits-banner {
     background: rgb(var(--color-neutral-800));
@@ -335,9 +386,22 @@ PAGE = """
       </div>
     </div>
 
+    <h2 class="section">Containerization</h2>
+    <div class="grid">
+      <div class="card" id="card-docker">
+        <div class="title">Docker <span class="pill unverified" id="pill-docker">checking...</span></div>
+        <div class="desc" id="desc-docker">Checking for container-runtime markers (hostname, cgroup namespace, /.dockerenv).</div>
+      </div>
+    </div>
+
     <h2 class="section">CI/CD Pipeline</h2>
     <button class="verify" id="buildsBtn" onclick="loadBuilds()">Load recent Cloud Build runs</button>
-    <div id="buildsList" style="text-align:left; margin-bottom:36px;"></div>
+    <div id="buildsList" style="text-align:left;"></div>
+    <div class="pagination" id="buildsPagination" style="display:none;">
+      <button id="buildsPrevBtn" onclick="changeBuildsPage(-1)">&larr; Prev</button>
+      <span class="page-label" id="buildsPageLabel"></span>
+      <button id="buildsNextBtn" onclick="changeBuildsPage(1)">Next &rarr;</button>
+    </div>
 
     <a class="repo" href="https://github.com/zle3/demo1" target="_blank" rel="noopener">View source on GitHub &rarr;</a>
     <footer>built by <a href="https://zachle.info" target="_blank" rel="noopener">Zach Le</a> &middot; terraform &middot; docker &middot; gcp &middot; cloudflare</footer>
@@ -345,6 +409,9 @@ PAGE = """
 
 <script>
 let lastIp = null;
+let allBuilds = [];
+let buildsPage = 0;
+const BUILDS_PER_PAGE = 5;
 
 async function runVerify() {
   const btn = document.getElementById('verifyBtn');
@@ -372,7 +439,8 @@ async function runVerify() {
       setPill('cf', true);
       lastIp = data.cf_connecting_ip;
       document.getElementById('desc-cf').innerHTML =
-        `CF-Ray: <code>${data.cf_ray}</code><br>Your IP per Cloudflare: <span class="reveal" onclick="revealIp(this)">click to reveal</span><br>Detected country: <code>${data.cf_country}</code>`;
+        `CF-Ray: <code>${data.cf_ray}</code><br>Detected country: <code>${data.cf_country}</code>` +
+        `<div class="ip-row">Your IP per Cloudflare: <span class="reveal" onclick="revealIp(this)">click to reveal</span></div>`;
     } else {
       setPill('cf', false);
       document.getElementById('desc-cf').textContent = 'No CF-Ray header present, this request did not pass through Cloudflare.';
@@ -386,33 +454,84 @@ async function runVerify() {
   btn.textContent = 'Re-verify GCP + Cloudflare';
 }
 
+async function runDockerCheck() {
+  try {
+    const res = await fetch('/api/docker');
+    const data = await res.json();
+    const ok = data.dockerenv_present || data.containerized;
+    setPill('docker', !!ok);
+    const cgroupLines = (data.cgroup_excerpt || []).join('<br>');
+    document.getElementById('desc-docker').innerHTML =
+      `Hostname (container ID-style): <code>${data.hostname}</code><br>` +
+      `/.dockerenv present: <code>${data.dockerenv_present}</code><br>` +
+      `cgroup namespace match: <code>${data.containerized}</code><br>` +
+      (cgroupLines ? `cgroup excerpt:<br><code>${cgroupLines}</code><br>` : '') +
+      `PID inside container: <code>${data.pid}</code>` +
+      (data.k_revision ? `<br>Cloud Run revision (built from this image): <code>${data.k_revision}</code>` : '');
+  } catch (e) {
+    setPill('docker', false);
+    document.getElementById('desc-docker').textContent = 'Could not reach /api/docker.';
+    console.error(e);
+  }
+}
+
 async function loadBuilds() {
   const btn = document.getElementById('buildsBtn');
-  const list = document.getElementById('buildsList');
   btn.disabled = true;
   btn.textContent = 'Loading...';
   try {
     const res = await fetch('/api/builds');
     const data = await res.json();
     if (!data.ok) {
-      list.innerHTML = `<div class="card">Could not load builds: ${data.error}</div>`;
+      document.getElementById('buildsList').innerHTML = `<div class="card">Could not load builds: ${data.error}</div>`;
+      document.getElementById('buildsPagination').style.display = 'none';
     } else {
-      list.innerHTML = data.builds.map(b => `
-        <div class="card buildrow">
-          <div class="title">
-            build ${b.id}
-            <span class="pill ${b.status === 'SUCCESS' ? 'verified' : 'unverified'}">${b.status}</span>
-          </div>
-          <div class="desc">commit: <code>${b.sha}</code><br>started: <code>${b.create_time || 'n/a'}</code></div>
-        </div>
-      `).join('');
+      allBuilds = data.builds;
+      buildsPage = 0;
+      renderBuildsPage();
     }
   } catch (e) {
-    list.innerHTML = '<div class="card">Failed to load build history.</div>';
+    document.getElementById('buildsList').innerHTML = '<div class="card">Failed to load build history.</div>';
     console.error(e);
   }
   btn.disabled = false;
   btn.textContent = 'Refresh';
+}
+
+function renderBuildsPage() {
+  const list = document.getElementById('buildsList');
+  const pagination = document.getElementById('buildsPagination');
+
+  if (allBuilds.length === 0) {
+    list.innerHTML = '<div class="card">No builds found.</div>';
+    pagination.style.display = 'none';
+    return;
+  }
+
+  const totalPages = Math.ceil(allBuilds.length / BUILDS_PER_PAGE);
+  const start = buildsPage * BUILDS_PER_PAGE;
+  const pageItems = allBuilds.slice(start, start + BUILDS_PER_PAGE);
+
+  list.innerHTML = pageItems.map(b => `
+    <div class="card buildrow">
+      <div class="title">
+        build ${b.id}
+        <span class="pill ${b.status === 'SUCCESS' ? 'verified' : 'unverified'}">${b.status}</span>
+      </div>
+      <div class="desc">commit: <code>${b.sha}</code><br>started: <code>${b.create_time || 'n/a'}</code></div>
+    </div>
+  `).join('');
+
+  pagination.style.display = totalPages > 1 ? 'flex' : 'none';
+  document.getElementById('buildsPageLabel').textContent = `Page ${buildsPage + 1} of ${totalPages}`;
+  document.getElementById('buildsPrevBtn').disabled = buildsPage === 0;
+  document.getElementById('buildsNextBtn').disabled = buildsPage >= totalPages - 1;
+}
+
+function changeBuildsPage(delta) {
+  const totalPages = Math.ceil(allBuilds.length / BUILDS_PER_PAGE);
+  buildsPage = Math.min(Math.max(0, buildsPage + delta), totalPages - 1);
+  renderBuildsPage();
 }
 
 async function loadUptimeHistory() {
@@ -459,10 +578,11 @@ window.addEventListener('DOMContentLoaded', () => {
   loadUptimeHistory();
   recordVisit();
   runVerify();
+  runDockerCheck();
 });
 
 function revealIp(el) {
-  el.outerHTML = `<code>${lastIp}</code>`;
+  el.outerHTML = `<code class="ip">${lastIp}</code>`;
 }
 
 function setPill(key, ok) {
